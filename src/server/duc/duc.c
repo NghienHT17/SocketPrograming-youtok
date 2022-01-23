@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <json-c/json.h>
 #include <mysql/mysql.h>
+#include <time.h>
 
 const char *server = "localhost";
 const char *user = "root";
@@ -18,12 +19,27 @@ int check_permission_to_watch_video(const char *user_id, const char *video_id);
 const char *no_login_search_video(const char *search_key);
 const char *update_privacy_respond(const char *video_id, const char *privacy);
 const char *insert_video_upload(const char *body);
+const char *rand_text(const char *file);
+const char *login_search_videos(const char *user_id, const char *search_key);
 
 int main()
 {
     char *body = "{ 'user_id': '1', 'title': 'Thuat toan khong kho 1', 'description': 'Pham Tuan Duc', 'privacy': 'public', 'filename': 'thuattoankhongkho.mp4', 'content_type': 'mp4', 'byte_size': '4096' }";
-    printf("%s\n", no_login_all_videos());
+    printf("%s\n", login_search_videos("2", "day con"));
     return 0;
+}
+const char* rand_text(const char *file) {
+    char *result;
+    result = (char*)malloc(sizeof(char*)*11 + strlen(file));
+    int i, rand_int;
+    char char_set[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&quot";
+
+    for (i = 0; i <9; i++) {
+        result[i] = char_set[rand() % sizeof(char_set)];
+    }
+    result[9] = '-';
+    strcat(result,file);
+    return result;
 }
 
 const char *insert_video_upload(const char *body)
@@ -47,6 +63,8 @@ const char *insert_video_upload(const char *body)
     json_object_object_get_ex(parsed_body_json, "filename", &filename);
     json_object_object_get_ex(parsed_body_json, "byte_size", &byte_size);
 
+    srand(time(NULL));
+    const char *file = rand_text(json_object_get_string(filename));
     char query_string[1024];
 
     strcpy(query_string, "INSERT INTO videos (user_id, title, description, privacy, filename, content_type, byte_size) VALUES (");
@@ -58,7 +76,7 @@ const char *insert_video_upload(const char *body)
     strcat(query_string, "','");
     strcat(query_string, json_object_get_string(privacy));
     strcat(query_string, "','");
-    strcat(query_string, json_object_get_string(filename));
+    strcat(query_string, file);
     strcat(query_string, "','");
     strcat(query_string, "mp4");
     strcat(query_string, "',");
@@ -471,7 +489,7 @@ const char *no_login_search_video(const char *search_key)
     conn = mysql_init(NULL);
 
     char query_string[255];
-    strcpy(query_string, "select videos.*,users.full_name FROM youtok.videos, youtok.users where youtok.videos.user_id = youtok.users.id and youtok.videos.title like \"%");
+    strcpy(query_string, "select videos.*,users.full_name FROM youtok.videos, youtok.users where youtok.videos.user_id = youtok.users.id and youtok.videos.privacy = \"public\" and youtok.videos.title like \"%");
     strcat(query_string, search_key);
     strcat(query_string, "%\";");
     printf("%s\n", query_string);
@@ -535,13 +553,6 @@ const char *no_login_search_video(const char *search_key)
             json_object_array_add(videos_list, video);
         }
     }
-    else
-    {
-        printf("failed!\n");
-        mysql_free_result(res);
-        mysql_close(conn);
-        return NULL;
-    }
 
     struct json_object *body_object = json_object_new_object();
 
@@ -553,4 +564,98 @@ const char *no_login_search_video(const char *search_key)
     mysql_close(conn);
 
     return json_object_to_json_string(no_login_search_video);
+}
+
+const char *login_search_videos(const char *user_id, const char *search_key)
+{
+    MYSQL *conn;
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+
+    struct json_object *login_search_videos = json_object_new_object();
+
+    conn = mysql_init(NULL);
+
+    char query_string[255];
+    strcpy(query_string, "select videos.*,users.full_name FROM youtok.videos, youtok.users where youtok.videos.user_id = youtok.users.id and  youtok.videos.privacy = \"public\" and youtok.videos.title like \"%");
+    strcat(query_string, search_key);
+    strcat(query_string, "%\" union select videos.*,users.full_name FROM youtok.videos, youtok.users where youtok.videos.user_id = youtok.users.id and youtok.videos.user_id = ");
+    strcat(query_string, user_id);
+    strcat(query_string, " and youtok.videos.title like \"%");
+    strcat(query_string, search_key);
+    strcat(query_string, "%\";");
+
+    printf("%s\n", query_string);
+
+    if (!mysql_real_connect(conn, server, user, password, database, 0, NULL, 0))
+    {
+        fprintf(stderr, "%s\n", mysql_error(conn));
+        exit(1);
+    }
+
+    if (mysql_query(conn, query_string))
+    {
+        fprintf(stderr, "%s\n", mysql_error(conn));
+        exit(1);
+    }
+
+    res = mysql_store_result(conn);
+
+    struct json_object *videos_list = json_object_new_array();
+
+    if (mysql_num_rows(res) > 0)
+    {
+        printf("successfully!\n");
+        while ((row = mysql_fetch_row(res)) != NULL)
+        {
+            char id[10];
+            char user_id[10];
+            char title[255];
+            char description[255];
+            char privacy[30];
+            char filename[255];
+            char content_type[10];
+            char byte_size[10];
+            char create_at[20];
+            char full_name[50];
+
+            strcpy(id, row[0]);
+            strcpy(user_id, row[1]);
+            strcpy(title, row[2]);
+            strcpy(description, row[3]);
+            strcpy(privacy, row[4]);
+            strcpy(filename, row[5]);
+            strcpy(content_type, row[6]);
+            strcpy(byte_size, row[7]);
+            strcpy(create_at, row[8]);
+            strcpy(full_name, row[9]);
+
+            struct json_object *video = json_object_new_object();
+
+            json_object_object_add(video, "id", json_object_new_string(id));
+            json_object_object_add(video, "user_id", json_object_new_string(user_id));
+            json_object_object_add(video, "author", json_object_new_string(full_name));
+            json_object_object_add(video, "title", json_object_new_string(title));
+            json_object_object_add(video, "description", json_object_new_string(description));
+            json_object_object_add(video, "privacy", json_object_new_string(privacy));
+            json_object_object_add(video, "filename", json_object_new_string(filename));
+            json_object_object_add(video, "content_type", json_object_new_string(content_type));
+            json_object_object_add(video, "byte_size", json_object_new_string(byte_size));
+            json_object_object_add(video, "create_at", json_object_new_string(create_at));
+
+            json_object_array_add(videos_list, video);
+        }
+    }
+
+
+    struct json_object *body_object = json_object_new_object();
+
+    json_object_object_add(body_object, "videos_list", videos_list);
+
+    json_object_object_add(login_search_videos, "body", body_object);
+
+    mysql_free_result(res);
+    mysql_close(conn);
+
+    return json_object_to_json_string(login_search_videos);
 }
